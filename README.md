@@ -5,6 +5,9 @@ on 2026-10-08. This repository ports it to `wasm32-unknown-unknown` (no WASI, no
 and races it against Rust on the language's own benchmark suite, compiled to the same target and run
 in the same engine.
 
+**Live: [goose-wasm.vercel.app](https://goose-wasm.vercel.app)**. The page shows the reference numbers
+below and can race every module again in your own browser.
+
 The Goose programs and the Rust programs are the ones that ship in Goose's `bench/` directory,
 unmodified. Every implementation of a benchmark must print the same checksums, and all 104 builds do.
 
@@ -123,7 +126,9 @@ python bench.py --sizes small,medium --reps 7 --web
 ```
 
 That writes `results.md`, `results.json`, and `web/dist`, the browser demo: the same modules, raced in
-the visitor's own browser in a Web Worker, with the Node numbers as reference. To view it locally:
+the visitor's own browser in a Web Worker, with the Node numbers as reference. `web/dist` is committed,
+because building it takes the Goose compiler, clang and rustc; Vercel serves it as static files with no
+build step (`vercel.json`), and every push to `main` redeploys it. To view it locally:
 
 ```bash
 python serve.py

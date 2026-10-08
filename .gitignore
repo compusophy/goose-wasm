@@ -2,3 +2,6 @@ gen/
 scratch/
 __pycache__/
 .vercel/
+
+.vercel
+.env*

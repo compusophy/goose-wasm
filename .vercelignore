@@ -1,3 +1,4 @@
 gen/
 scratch/
 __pycache__/
+.env*
