@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Goose vs Rust on Wasm</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,500..900&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<style>
+/* Layout: one timing-sheet column. Summary and controls, then one heat per
+   benchmark with a Goose lane and a Rust lane, then how the port works. */
+:root {
+  --paper: #f1f3ef;
+  --sheet: #fafbf8;
+  --ink: #15191b;
+  --muted: #5d6764;
+  --rule: #d3d8d2;
+  --goose: #13707a;
+  --goose-soft: #d5e9ea;
+  --rust: #b4502a;
+  --rust-soft: #f1ddd3;
+  --ok: #2d7a3e;
+  --bad: #b3261e;
+  --display: "Archivo", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #101415; --sheet: #161b1c; --ink: #e5e9e5; --muted: #95a09c; --rule: #2a3234;
+    --goose: #4fb8c2; --goose-soft: #173539; --rust: #e2825a; --rust-soft: #3d2419;
+    --ok: #6cc47e; --bad: #f08a80; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #101415; --sheet: #161b1c; --ink: #e5e9e5; --muted: #95a09c; --rule: #2a3234;
+  --goose: #4fb8c2; --goose-soft: #173539; --rust: #e2825a; --rust-soft: #3d2419;
+  --ok: #6cc47e; --bad: #f08a80; color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font: 400 15px/1.55 var(--body);
+  padding-inline: 16px;
+  padding-block: 0 64px;
+}
+.page { max-width: 980px; margin: 0 auto; display: grid; gap: 56px; }
+a { color: var(--goose); text-underline-offset: 2px; }
+a:hover { color: var(--ink); }
+code, .mono { font-family: var(--mono); font-size: 0.92em; }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; }
+.eyebrow {
+  font: 600 12px/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted);
+}
+
+/* --- masthead ---------------------------------------------------------- */
+header.top { padding-top: 48px; display: grid; gap: 20px; }
+h1 {
+  font-size: clamp(2.3rem, 6.4vw, 4.3rem); line-height: 0.95; font-weight: 850;
+  font-stretch: 72%; letter-spacing: -0.01em; text-transform: uppercase;
+}
+h1 .g { color: var(--goose); }
+h1 .r { color: var(--rust); }
+h1 .on { font-stretch: 100%; font-weight: 600; text-transform: none; color: var(--muted); font-size: 0.55em; letter-spacing: 0; }
+.lede { max-width: 64ch; font-size: 1.08rem; margin: 0; }
+.lede em { font-style: italic; }
+
+/* --- summary figures ---------------------------------------------------- */
+.figures { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: 2px solid var(--ink); }
+.fig { padding: 14px 16px 16px 0; display: grid; gap: 6px; align-content: start; }
+.fig + .fig { padding-left: 16px; border-left: 1px solid var(--rule); }
+.fig .v { font: 800 2.1rem/1 var(--display); font-stretch: 80%; font-variant-numeric: tabular-nums; }
+.fig .v small { font-size: 0.5em; font-weight: 600; color: var(--muted); }
+.fig .k { font-size: 0.85rem; color: var(--muted); line-height: 1.35; }
+.fig .live { font: 500 0.78rem/1.3 var(--mono); color: var(--goose); min-height: 1em; }
+@media (max-width: 720px) {
+  .figures { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fig:nth-child(3) { padding-left: 0; border-left: 0; }
+  .fig:nth-child(n+3) { border-top: 1px solid var(--rule); }
+}
+
+/* --- run controls --------------------------------------------------------- */
+.controls {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px;
+  background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 14px 16px;
+}
+button {
+  font: 600 0.95rem/1 var(--body); cursor: pointer; border-radius: 4px; padding: 11px 16px;
+  border: 1px solid var(--ink); background: var(--ink); color: var(--paper);
+}
+button:hover:not(:disabled) { background: var(--goose); border-color: var(--goose); }
+button:disabled { opacity: 0.5; cursor: progress; }
+button:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px solid var(--goose); outline-offset: 2px; }
+button.ghost { background: transparent; color: var(--ink); border-color: var(--rule); padding: 6px 10px; font-size: 0.8rem; }
+button.ghost:hover:not(:disabled) { color: var(--paper); }
+label.reps { font-size: 0.88rem; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+select { font: 500 0.88rem var(--mono); padding: 6px 8px; border-radius: 4px; border: 1px solid var(--rule); background: var(--paper); color: var(--ink); }
+.status { font: 500 0.85rem/1.4 var(--mono); color: var(--muted); flex: 1 1 260px; min-width: 0; }
+.progress { height: 3px; background: var(--rule); border-radius: 2px; overflow: hidden; flex-basis: 100%; }
+.progress > i { display: block; height: 100%; width: 0; background: var(--goose); transition: width 0.2s; }
+
+/* --- the heats ------------------------------------------------------------ */
+.sheet-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: end; gap: 8px 24px; margin-bottom: 14px; }
+.sheet-head h2 { font-size: 1.7rem; font-weight: 800; font-stretch: 78%; text-transform: uppercase; }
+.legend { display: flex; gap: 16px; font-size: 0.85rem; color: var(--muted); }
+.legend i { display: inline-block; width: 18px; height: 8px; border-radius: 1px; margin-right: 6px; vertical-align: 1px; }
+.heats { border-top: 2px solid var(--ink); }
+.heat { border-bottom: 1px solid var(--rule); padding: 14px 0 12px; display: grid; gap: 8px; }
+.heat-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; }
+.heat-top h3 { font-size: 1.25rem; font-weight: 800; font-stretch: 85%; }
+.heat-top .what { color: var(--muted); font-size: 0.9rem; flex: 1 1 320px; min-width: 0; }
+.chip {
+  font: 600 0.78rem/1 var(--mono); padding: 5px 8px; border-radius: 3px; white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.chip.goose { background: var(--goose-soft); color: var(--goose); }
+.chip.rust { background: var(--rust-soft); color: var(--rust); }
+.chip.even { background: var(--rule); color: var(--muted); }
+.lane {
+  display: grid; grid-template-columns: 52px minmax(0, 1fr) 92px 70px; align-items: center;
+  gap: 12px; font-variant-numeric: tabular-nums;
+}
+.lane .who { font: 600 0.78rem/1 var(--mono); text-transform: uppercase; letter-spacing: 0.06em; }
+.lane.goose .who { color: var(--goose); }
+.lane.rust .who { color: var(--rust); }
+.track { position: relative; height: 22px; display: flex; align-items: center; min-width: 0; }
+.bar { height: 100%; border-radius: 2px; min-width: 2px; transition: width 0.35s ease; }
+.goose .bar { background: var(--goose); }
+.rust .bar { background: var(--rust); }
+.track .impl {
+  position: absolute; left: 8px; right: 8px; font-size: 0.78rem; line-height: 22px; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; color: var(--paper); mix-blend-mode: normal; pointer-events: none;
+}
+.track .impl.outside { color: var(--muted); }
+.lane .ms { font: 600 0.95rem/1.1 var(--mono); text-align: right; }
+.lane .ms small { display: block; font-weight: 400; font-size: 0.72rem; color: var(--muted); }
+.lane .kb { font: 400 0.78rem/1.1 var(--mono); color: var(--muted); text-align: right; }
+.heat-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: 0.8rem; color: var(--muted); }
+.check.ok { color: var(--ok); }
+.check.bad { color: var(--bad); }
+details { font-size: 0.85rem; }
+summary { cursor: pointer; color: var(--muted); }
+.all { overflow-x: auto; }
+.all table { border-collapse: collapse; margin-top: 6px; min-width: 520px; width: 100%; }
+.all td, .all th { padding: 4px 10px 4px 0; text-align: left; font-variant-numeric: tabular-nums; border-bottom: 1px solid var(--rule); }
+.all th { font: 600 0.72rem/1.2 var(--mono); text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+.all td.n { text-align: right; font-family: var(--mono); }
+.all .goose { color: var(--goose); }
+.all .rust { color: var(--rust); }
+@media (max-width: 560px) {
+  .lane { grid-template-columns: 44px minmax(0, 1fr) 76px; }
+  .lane .kb { display: none; }
+}
+
+/* --- explainer sections ------------------------------------------------- */
+section.prose { display: grid; gap: 14px; }
+section.prose h2 { font-size: 1.7rem; font-weight: 800; font-stretch: 78%; text-transform: uppercase; }
+section.prose p { max-width: 68ch; margin: 0; }
+.pipeline { display: flex; flex-wrap: wrap; align-items: stretch; gap: 10px; margin: 6px 0; }
+.stage {
+  flex: 1 1 150px; min-width: 0; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px;
+  padding: 12px 14px; display: grid; gap: 4px; align-content: start;
+}
+.stage b { font: 700 0.95rem/1.2 var(--display); font-stretch: 90%; }
+.stage span { font-size: 0.82rem; color: var(--muted); line-height: 1.4; }
+.stage.out { border-color: var(--goose); }
+.stage.out b { color: var(--goose); }
+.arrow { align-self: center; color: var(--muted); font-family: var(--mono); }
+@media (max-width: 720px) { .arrow { display: none; } }
+pre {
+  margin: 0; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 12px 14px;
+  font: 0.82rem/1.5 var(--mono); overflow-x: auto;
+}
+.addr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+@media (max-width: 720px) { .addr { grid-template-columns: minmax(0, 1fr); } }
+.addr figure { margin: 0; display: grid; gap: 6px; }
+.addr figcaption { font-size: 0.85rem; color: var(--muted); }
+.addr .hit { color: var(--bad); font-weight: 600; }
+.addr .miss { color: var(--ok); font-weight: 600; }
+ul.notes { margin: 0; padding-left: 1.1em; display: grid; gap: 8px; max-width: 72ch; }
+footer { border-top: 1px solid var(--rule); padding-top: 16px; font-size: 0.85rem; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 20px; justify-content: space-between; }
+@media (prefers-reduced-motion: reduce) { .bar, .progress > i { transition: none; } }
+</style>
+
+<div class="page">
+  <header class="top">
+    <div class="eyebrow">wasm32-unknown-unknown &middot; no libc &middot; no WASI</div>
+    <h1><span class="g">Goose</span> vs <span class="r">Rust</span><br><span class="on">compiled to bare WebAssembly, racing in your browser</span></h1>
+    <p class="lede">
+      <a href="https://github.com/aardappel/goose">Goose</a> is a new memory-safe systems language with no heap: every
+      dynamic value lives inline on compiler-managed data stacks. It compiles to C, so I wrote a
+      freestanding runtime that lets that C target <code>wasm32-unknown-unknown</code> directly, then built
+      the language's own benchmark suite to WebAssembly twice: the Goose programs, and the Rust versions
+      that ship next to them. Same programs, same inputs, same checksums, same engine.
+      The runtime, harness and every number are <a href="https://github.com/compusophy/goose-wasm">on GitHub</a>.
+    </p>
+  </header>
+
+  <section>
+    <div class="figures" id="figures"></div>
+  </section>
+
+  <section class="controls" aria-label="Run the benchmarks">
+    <button id="run" type="button">Run all in this browser</button>
+    <label class="reps" for="size">input
+      <select id="size"></select>
+    </label>
+    <label class="reps" for="reps">best of
+      <select id="reps"><option value="1">1</option><option value="3" selected>3</option><option value="5">5</option></select>
+    </label>
+    <div class="status" id="status" role="status">Showing reference times from Node.</div>
+    <div class="progress" aria-hidden="true"><i id="bar"></i></div>
+  </section>
+
+  <section>
+    <div class="sheet-head">
+      <h2>Heats</h2>
+      <div class="legend"><span><i style="background:var(--goose)"></i>Goose, fastest variant</span><span><i style="background:var(--rust)"></i>Rust, fastest variant</span></div>
+    </div>
+    <div class="heats" id="heats"></div>
+  </section>
+
+  <section class="prose">
+    <h2>How Goose gets onto wasm</h2>
+    <p>
+      The Goose compiler emits one C file per program. Everything a hot loop touches is inline in that
+      file: pushes, indexing, varints, relative links. What it leaves to a separate runtime object is
+      small and boring: aborts, number formatting, printing, and handing out data stack regions. That split
+      is what makes a bare-wasm port practical. The replacement runtime is under 500 lines of C with no
+      libc behind it, and a Goose module imports at most four functions from its host.
+    </p>
+    <div class="pipeline" aria-label="Build pipeline">
+      <div class="stage"><b>blur.goose</b><span>the suite's benchmark, unmodified</span></div>
+      <div class="arrow">&rarr;</div>
+      <div class="stage"><b>goose -O2</b><span>whole-program compile to one C file</span></div>
+      <div class="arrow">&rarr;</div>
+      <div class="stage"><b>clang -O2 -flto</b><span><code>--target=wasm32-unknown-unknown</code> + <code>goose_wasm_rt.c</code> + 4 stub headers</span></div>
+      <div class="arrow">&rarr;</div>
+      <div class="stage out"><b id="blur-kb">blur.wasm</b><span>imports <code>env.gs_host_write</code> and <code>env.gs_host_exit</code></span></div>
+    </div>
+    <p>
+      Data stacks are the interesting part. Natively, each one is a large address-space reservation whose
+      pages commit on first touch, followed by an unmapped guard gap. Linear memory has no page protection
+      and grows only at its end, so here each region is a <code>memory.grow</code> of the whole reservation.
+      Engines map those pages lazily, so an untouched reservation costs address space rather than RAM.
+      The guard gap is what wasm cannot provide.
+    </p>
+  </section>
+
+  <section class="prose">
+    <h2>The power-of-two bug</h2>
+    <p>
+      The first full run had one outlier: <code>blur</code> took 99 ms in Goose against 58 ms in Rust, though
+      the two inner loops disassembled to nearly the same instructions: nine byte loads, the same shifts and
+      adds, one store. Timing the phases separately put the whole gap in the kernel, so the cause had to be
+      where the data was, not what the code did.
+    </p>
+    <p>
+      Each data stack region was exactly as long as its reservation, so the source image and the destination
+      image started exactly 1 GB apart. With a power-of-two distance, pixel <i>x</i> of row <i>y</i> in both
+      images agrees in every address bit below bit 30, which includes every bit the L1 and L2 caches use to
+      pick a set. The rows the kernel reads and the row it writes compete for the same few cache lines.
+    </p>
+    <div class="addr">
+      <figure>
+        <pre>src  0x00010000 + y*1024 + x
+dst  0x40010000 + y*1024 + x
+     <span class="hit">bits 0-29 equal: same cache sets</span></pre>
+        <figcaption>Regions exactly 1 GB apart: 95.3 ms. At 64 MB apart: 88.8 ms.</figcaption>
+      </figure>
+      <figure>
+        <pre>src  0x00010000 + y*1024 + x
+dst  0x40020440 + y*1024 + x
+     <span class="miss">different sets at every level</span></pre>
+        <figcaption>Each region padded by a page and shifted 1088 bytes per region: 57.5 ms. At 64 MB: 47.2 ms.</figcaption>
+      </figure>
+    </div>
+    <p>
+      The fix is cache coloring, four lines in the runtime: start each new region a different multiple of
+      64 bytes into an extra page. I first took this for 4K aliasing between loads and stores. Isolating the
+      two showed that sharing only the low 16 bits costs 2 to 10 percent here, and the power-of-two distance
+      costs the rest.
+    </p>
+  </section>
+
+  <section class="prose">
+    <h2>Method</h2>
+    <ul class="notes" id="method"></ul>
+  </section>
+
+  <footer>
+    <span>Port and benchmarks by compusophy (<a href="https://github.com/compusophy/goose-wasm">source and full results</a>). Goose by Wouter van Oortmerssen, Apache-2.0.</span>
+    <span id="stamp"></span>
+  </footer>
+</div>
+
+<script type="module">
+const REF = {"node":"v20.11.1","rustc":"rustc 1.96.0","date":"2026-10-08","reps":7,"benchmarks":[{"name":"sum","what":"Control: build a flat i32 array, then scan it eight times.","param":"N","n":1000000,"size":"small","expected":"1000000\n3998750656\n","rows":[{"lang":"goose","label":"goose grow-only array","wasm":"wasm/sum_small_sum_goose.wasm","ms":5.34,"mb":4.1,"kb":3.2},{"lang":"rust","label":"rust Vec, collect","wasm":"wasm/sum_small_sum_rust.wasm","ms":4.84,"mb":1.2,"kb":18.6}]},{"name":"sum","what":"Control: build a flat i32 array, then scan it eight times.","param":"N","n":16000000,"size":"medium","expected":"16000000\n63945983872\n","rows":[{"lang":"goose","label":"goose grow-only array","wasm":"wasm/sum_medium_sum_goose.wasm","ms":88.18,"mb":61.1,"kb":3.2},{"lang":"rust","label":"rust Vec, collect","wasm":"wasm/sum_medium_sum_rust.wasm","ms":83.87,"mb":58.9,"kb":18.6}]},{"name":"push","what":"Push N records while keeping pointers to every 64th one.","param":"N","n":1000000,"size":"small","expected":"1000000\n15625\n499758894813\n750050\n","rows":[{"lang":"goose","label":"goose array, typed references","wasm":"wasm/push_small_push_goose.wasm","ms":4.81,"mb":8.0,"kb":3.3},{"lang":"rust","label":"rust Vec+reserve, indices","wasm":"wasm/push_small_push_rust.wasm","ms":4.79,"mb":5.1,"kb":19.3}]},{"name":"push","what":"Push N records while keeping pointers to every 64th one.","param":"N","n":16000000,"size":"medium","expected":"16000000\n250000\n7999220817282\n12000142\n","rows":[{"lang":"goose","label":"goose array, typed references","wasm":"wasm/push_medium_push_goose.wasm","ms":71.13,"mb":124.4,"kb":3.3},{"lang":"rust","label":"rust Vec+reserve, indices","wasm":"wasm/push_medium_push_rust.wasm","ms":81.0,"mb":121.8,"kb":19.3}]},{"name":"strlist","what":"Split a text into N words, keep them as a list, scan it four times.","param":"N","n":200000,"size":"small","expected":"200000\n184370712\n","rows":[{"lang":"goose","label":"goose inline strings, owned","wasm":"wasm/strlist_small_strlist_goose.wasm","ms":13.24,"mb":5.2,"kb":4.1},{"lang":"rust","label":"rust Vec<String>","wasm":"wasm/strlist_small_strlist_owned_rust.wasm","ms":20.34,"mb":7.5,"kb":20.5},{"lang":"rust","label":"rust Vec<&str>","wasm":"wasm/strlist_small_strlist_borrowed_rust.wasm","ms":14.34,"mb":3.9,"kb":20.3}]},{"name":"strlist","what":"Split a text into N words, keep them as a list, scan it four times.","param":"N","n":2000000,"size":"medium","expected":"2000000\n1843958476\n","rows":[{"lang":"goose","label":"goose inline strings, owned","wasm":"wasm/strlist_medium_strlist_goose.wasm","ms":128.03,"mb":53.9,"kb":4.1},{"lang":"rust","label":"rust Vec<String>","wasm":"wasm/strlist_medium_strlist_owned_rust.wasm","ms":212.17,"mb":88.6,"kb":20.5},{"lang":"rust","label":"rust Vec<&str>","wasm":"wasm/strlist_medium_strlist_borrowed_rust.wasm","ms":144.05,"mb":54.0,"kb":20.3}]},{"name":"records","what":"Build a log of N variant records, aggregate it four times.","param":"N","n":500000,"size":"small","expected":"500000\n87531239268\n","rows":[{"lang":"goose","label":"goose variable enum","wasm":"wasm/records_small_records_var_goose.wasm","ms":18.32,"mb":4.7,"kb":3.9},{"lang":"goose","label":"goose fixed enum","wasm":"wasm/records_small_records_fixed_goose.wasm","ms":20.57,"mb":10.2,"kb":4.2},{"lang":"rust","label":"rust enum + String","wasm":"wasm/records_small_records_rust.wasm","ms":29.26,"mb":13.0,"kb":20.0}]},{"name":"records","what":"Build a log of N variant records, aggregate it four times.","param":"N","n":4000000,"size":"medium","expected":"4000000\n701055136604\n","rows":[{"lang":"goose","label":"goose variable enum","wasm":"wasm/records_medium_records_var_goose.wasm","ms":145.18,"mb":35.5,"kb":3.9},{"lang":"goose","label":"goose fixed enum","wasm":"wasm/records_medium_records_fixed_goose.wasm","ms":159.49,"mb":80.3,"kb":4.2},{"lang":"rust","label":"rust enum + String","wasm":"wasm/records_medium_records_rust.wasm","ms":234.02,"mb":123.0,"kb":20.0}]},{"name":"tree","what":"Build a complete binary tree of the given depth, sum it eight times.","param":"depth","n":16,"size":"small","expected":"131071\n522963940\n","rows":[{"lang":"goose","label":"goose pool + typed relative refs","wasm":"wasm/tree_small_tree_goose.wasm","ms":3.67,"mb":1.6,"kb":3.5},{"lang":"rust","label":"rust Box nodes","wasm":"wasm/tree_small_tree_box_rust.wasm","ms":6.03,"mb":0.0,"kb":18.2},{"lang":"rust","label":"rust arena + indices","wasm":"wasm/tree_small_tree_arena_rust.wasm","ms":3.59,"mb":0.0,"kb":19.3}]},{"name":"tree","what":"Build a complete binary tree of the given depth, sum it eight times.","param":"depth","n":20,"size":"medium","expected":"2097151\n8377899684\n","rows":[{"lang":"goose","label":"goose pool + typed relative refs","wasm":"wasm/tree_medium_tree_goose.wasm","ms":72.42,"mb":24.0,"kb":3.5},{"lang":"rust","label":"rust Box nodes","wasm":"wasm/tree_medium_tree_box_rust.wasm","ms":119.73,"mb":30.1,"kb":18.2},{"lang":"rust","label":"rust arena + indices","wasm":"wasm/tree_medium_tree_arena_rust.wasm","ms":76.57,"mb":21.7,"kb":19.3}]},{"name":"interp","what":"Build an expression tree of the given depth, evaluate it eight times.","param":"depth","n":16,"size":"small","expected":"36407\n675881\n","rows":[{"lang":"goose","label":"goose case functions + relative refs","wasm":"wasm/interp_small_interp_goose.wasm","ms":1.5,"mb":0.1,"kb":3.6},{"lang":"rust","label":"rust enum + Box","wasm":"wasm/interp_small_interp_box_rust.wasm","ms":2.19,"mb":0.0,"kb":18.6},{"lang":"rust","label":"rust enum + arena indices","wasm":"wasm/interp_small_interp_arena_rust.wasm","ms":1.48,"mb":0.0,"kb":19.4}]},{"name":"interp","what":"Build an expression tree of the given depth, evaluate it eight times.","param":"depth","n":20,"size":"medium","expected":"294997\n950682\n","rows":[{"lang":"goose","label":"goose case functions + relative refs","wasm":"wasm/interp_medium_interp_goose.wasm","ms":11.89,"mb":1.9,"kb":3.6},{"lang":"rust","label":"rust enum + Box","wasm":"wasm/interp_medium_interp_box_rust.wasm","ms":20.85,"mb":2.1,"kb":18.6},{"lang":"rust","label":"rust enum + arena indices","wasm":"wasm/interp_medium_interp_arena_rust.wasm","ms":13.57,"mb":6.8,"kb":19.4}]},{"name":"graph","what":"Build adjacency for V vertices and 8V edges in one pass, then BFS from four sources.","param":"V","n":100000,"size":"small","expected":"900000\n2296959\n","rows":[{"lang":"goose","label":"goose one-pass, typed relative refs","wasm":"wasm/graph_small_graph_goose.wasm","ms":123.22,"mb":8.0,"kb":4.1},{"lang":"goose","label":"goose CSR two-pass","wasm":"wasm/graph_small_graph_csr_goose.wasm","ms":28.19,"mb":11.2,"kb":4.4},{"lang":"rust","label":"rust Vec<Vec>","wasm":"wasm/graph_small_graph_nested_rust.wasm","ms":66.13,"mb":4.9,"kb":20.2},{"lang":"rust","label":"rust CSR two-pass","wasm":"wasm/graph_small_graph_csr_rust.wasm","ms":27.5,"mb":8.0,"kb":21.0},{"lang":"rust","label":"rust arena + indices","wasm":"wasm/graph_small_graph_arena_rust.wasm","ms":171.96,"mb":5.1,"kb":20.5}]},{"name":"graph","what":"Build adjacency for V vertices and 8V edges in one pass, then BFS from four sources.","param":"V","n":500000,"size":"medium","expected":"4500000\n12991077\n","rows":[{"lang":"goose","label":"goose one-pass, typed relative refs","wasm":"wasm/graph_medium_graph_goose.wasm","ms":1076.62,"mb":38.5,"kb":4.2},{"lang":"goose","label":"goose CSR two-pass","wasm":"wasm/graph_medium_graph_csr_goose.wasm","ms":289.01,"mb":53.9,"kb":4.4},{"lang":"rust","label":"rust Vec<Vec>","wasm":"wasm/graph_medium_graph_nested_rust.wasm","ms":633.63,"mb":35.8,"kb":20.3},{"lang":"rust","label":"rust CSR two-pass","wasm":"wasm/graph_medium_graph_csr_rust.wasm","ms":302.59,"mb":51.5,"kb":21.0},{"lang":"rust","label":"rust arena + indices","wasm":"wasm/graph_medium_graph_arena_rust.wasm","ms":1266.49,"mb":36.3,"kb":20.5}]},{"name":"words","what":"Count word frequencies over a text of N words.","param":"N","n":500000,"size":"small","expected":"500000\n37227\n58988349\n","rows":[{"lang":"goose","label":"goose slices + open addressing","wasm":"wasm/words_small_words_goose.wasm","ms":46.14,"mb":16.9,"kb":5.7},{"lang":"goose","label":"goose std dictionary","wasm":"wasm/words_small_words_dictionary_goose.wasm","ms":49.88,"mb":14.6,"kb":8.5},{"lang":"rust","label":"rust HashMap<&str>","wasm":"wasm/words_small_words_hashmap_rust.wasm","ms":57.94,"mb":10.1,"kb":25.2},{"lang":"rust","label":"rust open addressing","wasm":"wasm/words_small_words_open_rust.wasm","ms":49.1,"mb":12.2,"kb":21.5}]},{"name":"words","what":"Count word frequencies over a text of N words.","param":"N","n":4000000,"size":"medium","expected":"4000000\n287555\n472050912\n","rows":[{"lang":"goose","label":"goose slices + open addressing","wasm":"wasm/words_medium_words_goose.wasm","ms":656.08,"mb":132.4,"kb":5.7},{"lang":"goose","label":"goose std dictionary","wasm":"wasm/words_medium_words_dictionary_goose.wasm","ms":663.08,"mb":113.6,"kb":8.5},{"lang":"rust","label":"rust HashMap<&str>","wasm":"wasm/words_medium_words_hashmap_rust.wasm","ms":1036.87,"mb":94.7,"kb":25.2},{"lang":"rust","label":"rust open addressing","wasm":"wasm/words_medium_words_open_rust.wasm","ms":782.01,"mb":111.8,"kb":21.5}]},{"name":"particles","what":"Integrate N particles for 200 steps of f32 vector math.","param":"N","n":100000,"size":"small","expected":"100000\n1930703251\n","rows":[{"lang":"goose","label":"goose AoS, elementwise","wasm":"wasm/particles_small_particles_goose.wasm","ms":36.01,"mb":2.6,"kb":3.3},{"lang":"goose","label":"goose AoS, per component","wasm":"wasm/particles_small_particles_scalar_goose.wasm","ms":31.71,"mb":2.5,"kb":3.2},{"lang":"rust","label":"rust AoS, elementwise","wasm":"wasm/particles_small_particles_rust.wasm","ms":36.76,"mb":0.0,"kb":18.7},{"lang":"rust","label":"rust AoS, per component","wasm":"wasm/particles_small_particles_scalar_rust.wasm","ms":32.27,"mb":0.0,"kb":18.6}]},{"name":"particles","what":"Integrate N particles for 200 steps of f32 vector math.","param":"N","n":1000000,"size":"medium","expected":"1000000\n19381529234\n","rows":[{"lang":"goose","label":"goose AoS, elementwise","wasm":"wasm/particles_medium_particles_goose.wasm","ms":573.52,"mb":23.1,"kb":3.3},{"lang":"goose","label":"goose AoS, per component","wasm":"wasm/particles_medium_particles_scalar_goose.wasm","ms":500.39,"mb":23.1,"kb":3.2},{"lang":"rust","label":"rust AoS, elementwise","wasm":"wasm/particles_medium_particles_rust.wasm","ms":521.31,"mb":20.5,"kb":18.7},{"lang":"rust","label":"rust AoS, per component","wasm":"wasm/particles_medium_particles_scalar_rust.wasm","ms":505.86,"mb":20.2,"kb":18.6}]},{"name":"sexp","what":"Generate N s-expression forms, parse them into a tree, walk it four times.","param":"N","n":20000,"size":"small","expected":"9594225\n1523168\n20000\n0\n109567807650\n","rows":[{"lang":"goose","label":"goose pool + refs, inline text","wasm":"wasm/sexp_small_sexp_goose.wasm","ms":137.89,"mb":24.9,"kb":8.3},{"lang":"rust","label":"rust enum + Box + String","wasm":"wasm/sexp_small_sexp_box_rust.wasm","ms":303.71,"mb":50.7,"kb":28.8},{"lang":"rust","label":"rust arena + &str","wasm":"wasm/sexp_small_sexp_arena_rust.wasm","ms":137.66,"mb":62.5,"kb":28.9}]},{"name":"sexp","what":"Generate N s-expression forms, parse them into a tree, walk it four times.","param":"N","n":100000,"size":"medium","expected":"47939902\n7609503\n100000\n0\n547350405826\n","rows":[{"lang":"goose","label":"goose pool + refs, inline text","wasm":"wasm/sexp_medium_sexp_goose.wasm","ms":676.0,"mb":123.1,"kb":8.3},{"lang":"rust","label":"rust enum + Box + String","wasm":"wasm/sexp_medium_sexp_box_rust.wasm","ms":6538.09,"mb":263.2,"kb":28.8},{"lang":"rust","label":"rust arena + &str","wasm":"wasm/sexp_medium_sexp_arena_rust.wasm","ms":661.27,"mb":288.0,"kb":28.9}]},{"name":"lru","what":"An LRU cache of capacity N/8 under N skewed lookups, with an invalidation every 16th operation.","param":"N","n":2000000,"size":"small","expected":"1232608\n641958\n82565\n250000\n16746048090193918132\n125422431\n","rows":[{"lang":"goose","label":"goose reusable pool + pool-relative refs","wasm":"wasm/lru_small_lru_goose.wasm","ms":105.21,"mb":7.9,"kb":7.8},{"lang":"rust","label":"rust HashMap + arena","wasm":"wasm/lru_small_lru_hashmap_rust.wasm","ms":190.57,"mb":11.3,"kb":25.6},{"lang":"rust","label":"rust open addressing + arena","wasm":"wasm/lru_small_lru_open_rust.wasm","ms":119.68,"mb":9.2,"kb":21.6}]},{"name":"lru","what":"An LRU cache of capacity N/8 under N skewed lookups, with an invalidation every 16th operation.","param":"N","n":8000000,"size":"medium","expected":"4937489\n2561689\n329505\n1000000\n1009107182135619685\n501925078\n","rows":[{"lang":"goose","label":"goose reusable pool + pool-relative refs","wasm":"wasm/lru_medium_lru_goose.wasm","ms":797.86,"mb":31.8,"kb":7.8},{"lang":"rust","label":"rust HashMap + arena","wasm":"wasm/lru_medium_lru_hashmap_rust.wasm","ms":1373.99,"mb":41.8,"kb":25.6},{"lang":"rust","label":"rust open addressing + arena","wasm":"wasm/lru_medium_lru_open_rust.wasm","ms":821.65,"mb":45.4,"kb":21.6}]},{"name":"scene","what":"Build a scene graph of the given depth, then animate it and recompute world transforms for 16 frames.","param":"depth","n":12,"size":"small","expected":"40724\n2731850\n","rows":[{"lang":"goose","label":"goose pool + inline child refs","wasm":"wasm/scene_small_scene_goose.wasm","ms":15.26,"mb":4.6,"kb":5.2},{"lang":"rust","label":"rust Box children","wasm":"wasm/scene_small_scene_box_rust.wasm","ms":24.74,"mb":2.6,"kb":20.3},{"lang":"rust","label":"rust arena + child indices","wasm":"wasm/scene_small_scene_arena_rust.wasm","ms":15.6,"mb":9.6,"kb":20.9}]},{"name":"scene","what":"Build a scene graph of the given depth, then animate it and recompute world transforms for 16 frames.","param":"depth","n":14,"size":"medium","expected":"254401\n16563864\n","rows":[{"lang":"goose","label":"goose pool + inline child refs","wasm":"wasm/scene_medium_scene_goose.wasm","ms":141.57,"mb":28.4,"kb":5.2},{"lang":"rust","label":"rust Box children","wasm":"wasm/scene_medium_scene_box_rust.wasm","ms":274.09,"mb":29.7,"kb":20.3},{"lang":"rust","label":"rust arena + child indices","wasm":"wasm/scene_medium_scene_arena_rust.wasm","ms":149.32,"mb":57.1,"kb":20.9}]},{"name":"calc","what":"Generate, parse and evaluate N small arithmetic expressions, a third of them malformed.","param":"N","n":100000,"size":"small","expected":"4149826\n1689408\n64873\n1451\n15377\n14237\n4062\n2440448890907290840\n","rows":[{"lang":"goose","label":"goose local pool + return from","wasm":"wasm/calc_small_calc_goose.wasm","ms":50.9,"mb":1.1,"kb":10.0},{"lang":"rust","label":"rust Box + Result","wasm":"wasm/calc_small_calc_box_rust.wasm","ms":95.2,"mb":0.0,"kb":22.6},{"lang":"rust","label":"rust arena + Result","wasm":"wasm/calc_small_calc_arena_rust.wasm","ms":51.59,"mb":0.0,"kb":22.8}]},{"name":"calc","what":"Generate, parse and evaluate N small arithmetic expressions, a third of them malformed.","param":"N","n":400000,"size":"medium","expected":"16589727\n6746064\n259281\n5627\n61247\n57752\n16093\n17094074625383217522\n","rows":[{"lang":"goose","label":"goose local pool + return from","wasm":"wasm/calc_medium_calc_goose.wasm","ms":203.87,"mb":1.1,"kb":10.0},{"lang":"rust","label":"rust Box + Result","wasm":"wasm/calc_medium_calc_box_rust.wasm","ms":377.6,"mb":0.0,"kb":22.6},{"lang":"rust","label":"rust arena + Result","wasm":"wasm/calc_medium_calc_arena_rust.wasm","ms":204.82,"mb":0.1,"kb":22.8}]},{"name":"bintrees","what":"The Benchmarks Game binary-trees: build, check and discard many trees up to the given depth.","param":"depth","n":15,"size":"small","expected":"131071\n32768\n4\n1015808\n8192\n6\n1040384\n2048\n8\n1046528\n512\n10\n1048064\n128\n12\n1048448\n32\n14\n1048544\n65535\n","rows":[{"lang":"goose","label":"goose local pool per tree","wasm":"wasm/bintrees_small_bintrees_goose.wasm","ms":48.1,"mb":2.1,"kb":4.4},{"lang":"rust","label":"rust Box","wasm":"wasm/bintrees_small_bintrees_box_rust.wasm","ms":173.28,"mb":0.0,"kb":18.8},{"lang":"rust","label":"rust Vec arena","wasm":"wasm/bintrees_small_bintrees_arena_rust.wasm","ms":30.84,"mb":0.0,"kb":19.8}]},{"name":"bintrees","what":"The Benchmarks Game binary-trees: build, check and discard many trees up to the given depth.","param":"depth","n":17,"size":"medium","expected":"524287\n131072\n4\n4063232\n32768\n6\n4161536\n8192\n8\n4186112\n2048\n10\n4192256\n512\n12\n4193792\n128\n14\n4194176\n32\n16\n4194272\n262143\n","rows":[{"lang":"goose","label":"goose local pool per tree","wasm":"wasm/bintrees_medium_bintrees_goose.wasm","ms":215.79,"mb":6.4,"kb":4.4},{"lang":"rust","label":"rust Box","wasm":"wasm/bintrees_medium_bintrees_box_rust.wasm","ms":798.93,"mb":5.6,"kb":18.9},{"lang":"rust","label":"rust Vec arena","wasm":"wasm/bintrees_medium_bintrees_arena_rust.wasm","ms":140.25,"mb":5.3,"kb":20.0}]},{"name":"respond","what":"Build and render N JSON responses, each a DTO holding a name and a list of line items.","param":"N","n":100000,"size":"small","expected":"100000\n22983649\n4263108621399969415\n","rows":[{"lang":"goose","label":"goose inline DTO","wasm":"wasm/respond_small_respond_goose.wasm","ms":54.47,"mb":4.5,"kb":10.6},{"lang":"goose","label":"goose streaming","wasm":"wasm/respond_small_respond_stream_goose.wasm","ms":35.56,"mb":1.7,"kb":7.6},{"lang":"rust","label":"rust DTO + String","wasm":"wasm/respond_small_respond_dto_rust.wasm","ms":123.93,"mb":0.7,"kb":23.0},{"lang":"rust","label":"rust streaming","wasm":"wasm/respond_small_respond_stream_rust.wasm","ms":71.56,"mb":0.4,"kb":21.6}]},{"name":"respond","what":"Build and render N JSON responses, each a DTO holding a name and a list of line items.","param":"N","n":400000,"size":"medium","expected":"400000\n91800236\n8685297199210497210\n","rows":[{"lang":"goose","label":"goose inline DTO","wasm":"wasm/respond_medium_respond_goose.wasm","ms":219.45,"mb":4.8,"kb":10.6},{"lang":"goose","label":"goose streaming","wasm":"wasm/respond_medium_respond_stream_goose.wasm","ms":141.52,"mb":1.8,"kb":7.6},{"lang":"rust","label":"rust DTO + String","wasm":"wasm/respond_medium_respond_dto_rust.wasm","ms":492.68,"mb":0.6,"kb":23.0},{"lang":"rust","label":"rust streaming","wasm":"wasm/respond_medium_respond_stream_rust.wasm","ms":284.06,"mb":0.6,"kb":21.6}]},{"name":"blur","what":"16 passes of a 3x3 blur over a WxW 8-bit image.","param":"W","n":1024,"size":"small","expected":"1024\n125433619\n","rows":[{"lang":"goose","label":"goose flat indexing","wasm":"wasm/blur_small_blur_goose.wasm","ms":46.35,"mb":2.3,"kb":3.0},{"lang":"goose","label":"goose row slices","wasm":"wasm/blur_small_blur_rows_goose.wasm","ms":46.03,"mb":2.1,"kb":3.0},{"lang":"rust","label":"rust flat indexing","wasm":"wasm/blur_small_blur_index_rust.wasm","ms":61.75,"mb":0.0,"kb":20.0},{"lang":"rust","label":"rust row slices","wasm":"wasm/blur_small_blur_windows_rust.wasm","ms":43.82,"mb":0.0,"kb":20.0}]},{"name":"blur","what":"16 passes of a 3x3 blur over a WxW 8-bit image.","param":"W","n":2048,"size":"medium","expected":"2048\n502239988\n","rows":[{"lang":"goose","label":"goose flat indexing","wasm":"wasm/blur_medium_blur_goose.wasm","ms":182.63,"mb":8.2,"kb":3.0},{"lang":"goose","label":"goose row slices","wasm":"wasm/blur_medium_blur_rows_goose.wasm","ms":182.64,"mb":8.3,"kb":3.0},{"lang":"rust","label":"rust flat indexing","wasm":"wasm/blur_medium_blur_index_rust.wasm","ms":242.91,"mb":5.7,"kb":20.0},{"lang":"rust","label":"rust row slices","wasm":"wasm/blur_medium_blur_windows_rust.wasm","ms":174.97,"mb":5.7,"kb":20.1}]}]};
+const SIZES = [...new Set(REF.benchmarks.map((b) => b.size))];
+let SIZE = SIZES.includes("medium") ? "medium" : SIZES[0];
+const benches = () => REF.benchmarks.filter((b) => b.size === SIZE);
+
+const $ = (id) => document.getElementById(id);
+const live = new Map();          // wasm path -> { ms, ok, error, out }
+const fmtMs = (ms) => (ms >= 100 ? ms.toFixed(0) : ms.toFixed(1));
+const fmtKb = (kb) => (kb >= 100 ? kb.toFixed(0) : kb.toFixed(1)) + " KB";
+const geomean = (xs) => Math.exp(xs.reduce((a, x) => a + Math.log(x), 0) / xs.length);
+const median = (xs) => { const s = [...xs].sort((a, b) => a - b); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function timeOf(row, source) {
+  if (source === "live") { const l = live.get(row.wasm); return l && l.ok ? l.ms : null; }
+  return row.ms;
+}
+
+function bestOf(b, lang, source) {
+  let best = null;
+  for (const row of b.rows) {
+    if (row.lang !== lang) continue;
+    const t = timeOf(row, source);
+    if (t != null && (!best || t < best.t)) best = { row, t };
+  }
+  return best;
+}
+
+function ratios(source) {
+  const out = [];
+  for (const b of benches()) {
+    const g = bestOf(b, "goose", source), r = bestOf(b, "rust", source);
+    if (g && r) out.push(r.t / g.t);
+  }
+  return out;
+}
+
+function renderFigures() {
+  const ref = ratios("ref"), lv = ratios("live");
+  const wins = ref.filter((x) => x > 1.02).length, losses = ref.filter((x) => x < 0.98).length;
+  const gkb = median(benches().flatMap((b) => b.rows.filter((r) => r.lang === "goose").map((r) => r.kb)));
+  const rkb = median(benches().flatMap((b) => b.rows.filter((r) => r.lang === "rust").map((r) => r.kb)));
+  const mem = [];
+  for (const b of benches()) {
+    const g = bestOf(b, "goose", "ref"), r = bestOf(b, "rust", "ref");
+    if (g && r && g.row.mb >= 1 && r.row.mb >= 1) mem.push(r.row.mb / g.row.mb);
+  }
+  const lvWins = lv.filter((x) => x > 1.02).length;
+  $("figures").innerHTML = `
+    <div class="fig"><div class="v">${geomean(ref).toFixed(2)}<small>&times;</small></div>
+      <div class="k">Goose speed relative to the fastest Rust variant, geometric mean over ${ref.length} benchmarks</div>
+      <div class="live">${lv.length ? `your browser: ${geomean(lv).toFixed(2)}&times; over ${lv.length}` : ""}</div></div>
+    <div class="fig"><div class="v">${wins}<small> / ${losses}</small></div>
+      <div class="k">benchmarks Goose wins / loses by more than 2%; the rest are level</div>
+      <div class="live">${lv.length ? `your browser: ${lvWins} wins` : ""}</div></div>
+    <div class="fig"><div class="v">${mem.length ? geomean(mem).toFixed(2) : "–"}<small>&times;</small></div>
+      <div class="k">less memory than Rust, geometric mean over the ${mem.length} benchmarks where both use 1 MB or more</div>
+      <div class="live"></div></div>
+    <div class="fig"><div class="v">${gkb.toFixed(1)}<small> KB</small></div>
+      <div class="k">median Goose module, against ${rkb.toFixed(0)} KB for Rust, both with custom sections stripped</div>
+      <div class="live"></div></div>`;
+}
+
+function chip(ratio) {
+  if (ratio == null) return "";
+  if (ratio > 1.02) return `<span class="chip goose">Goose ${ratio.toFixed(2)}&times;</span>`;
+  if (ratio < 0.98) return `<span class="chip rust">Rust ${(1 / ratio).toFixed(2)}&times;</span>`;
+  return `<span class="chip even">level</span>`;
+}
+
+function lane(b, lang, scale) {
+  const lv = bestOf(b, lang, "live"), rf = bestOf(b, lang, "ref");
+  const use = lv || rf;
+  if (!use) return "";
+  const pct = Math.max(1, Math.min(100, (use.t / scale) * 100));
+  const label = use.row.label.replace(/^(goose|rust)\s+/, "");
+  const sub = lv ? `ref ${fmtMs(rf.t)}` : "ref, Node";
+  return `
+    <div class="lane ${lang}">
+      <span class="who">${lang}</span>
+      <div class="track"><div class="bar" style="width:${pct}%"></div><span class="impl${pct < 55 ? " outside" : ""}" style="${pct < 55 ? `left:calc(${pct}% + 8px)` : ""}">${esc(label)}</span></div>
+      <span class="ms">${fmtMs(use.t)} ms<small>${sub}</small></span>
+      <span class="kb">${fmtKb(use.row.kb)}</span>
+    </div>`;
+}
+
+function renderHeats() {
+  $("heats").innerHTML = benches().map((b, i) => {
+    const source = b.rows.some((r) => live.get(r.wasm)?.ok) ? "live" : "ref";
+    const g = bestOf(b, "goose", source) || bestOf(b, "goose", "ref");
+    const r = bestOf(b, "rust", source) || bestOf(b, "rust", "ref");
+    const scale = Math.max(g ? g.t : 0, r ? r.t : 0);
+    const checks = b.rows.map((row) => live.get(row.wasm)).filter(Boolean);
+    let check = "";
+    if (checks.length) {
+      const bad = checks.filter((c) => !c.ok || c.out !== b.expected).length;
+      check = bad ? `<span class="check bad">${bad} of ${checks.length} runs failed or printed other checksums</span>`
+                  : `<span class="check ok">checksums match the reference (${checks.length} runs)</span>`;
+    }
+    const rows = b.rows.map((row) => {
+      const l = live.get(row.wasm);
+      const lt = l ? (l.ok ? fmtMs(l.ms) : "failed") : "";
+      return `<tr><td class="${row.lang}">${esc(row.label)}</td><td class="n">${fmtMs(row.ms)}</td><td class="n">${lt}</td><td class="n">${row.mb.toFixed(1)}</td><td class="n">${fmtKb(row.kb)}</td></tr>`;
+    }).join("");
+    return `
+      <article class="heat" id="h-${b.name}">
+        <div class="heat-top"><h3>${b.name}</h3><span class="what">${esc(b.what)} <span class="mono">${b.param}=${b.n.toLocaleString("en-US")}</span></span>${g && r ? chip(r.t / g.t) : ""}</div>
+        ${lane(b, "goose", scale)}
+        ${lane(b, "rust", scale)}
+        <div class="heat-foot">
+          <button class="ghost" type="button" data-run="${i}">Run this heat</button>
+          ${check}
+          <details><summary>All ${b.rows.length} implementations</summary>
+            <div class="all"><table>
+              <thead><tr><th>implementation</th><th>ref ms</th><th>your ms</th><th>MB used</th><th>code</th></tr></thead>
+              <tbody>${rows}</tbody></table></div>
+          </details>
+        </div>
+      </article>`;
+  }).join("");
+}
+
+function renderMethod() {
+  const items = [
+    `Programs and sizes are the Goose repository's own benchmark suite (<code>bench/goose</code>, <code>bench/rust</code>), unmodified, at its <i>small</i> and <i>medium</i> sizes. Every implementation must print the same checksums; the page checks your browser's output against the reference.`,
+    `Goose: <code>goose -O2</code> to C, then clang <code>-O2 -flto --target=wasm32-unknown-unknown</code>. Rust: ${esc(REF.rustc)} <code>-O -C codegen-units=1 --target wasm32-unknown-unknown</code>, the suite's native flags retargeted. Both use the same wasm features (bulk memory, sign extension, non-trapping float conversion, multivalue, reference types), no SIMD, and no wasm-opt.`,
+    `Rust keeps its default wasm allocator (dlmalloc) and std. Its <code>println!</code> is shadowed by a macro that hands each line to the host, so both languages print through the same import.`,
+    `A time is one complete program run inside an already-compiled module: input generation, the work, and Rust's drops at the end. Compilation and instantiation are excluded. Each run gets a fresh instance and fresh linear memory. The reference column is the best of ${REF.reps} fresh Node ${esc(REF.node)} processes with <code>--no-liftoff</code>; in your browser it is the best of the runs you choose, after one warm-up run.`,
+    `Memory is peak resident set above an empty program of the same language, from the Node runs.`,
+    `A Goose data stack reserves its whole region up front, and growing linear memory costs V8 about 3 ms per GB on this machine. So each Goose program is first run once to measure its fullest stack, and the timed build reserves twice that, rounded up to a power of two (at least 16 MB). Rust's allocator grows the heap as it goes, which is the nearest equivalent.`,
+    `V8 compiles wasm lazily by default, which puts compilation inside the timing and charges each program for its code size. The Node runs use <code>--no-wasm-lazy-compilation</code>; in your browser the warm-up run absorbs it.`,
+    `Rust's <code>usize</code> is 32 bits on wasm32, while Goose lengths and indices are always 64-bit. That costs Goose some extra integer work in index-heavy loops, and it is left as is.`,
+    `This port has no threads and no guard gap after data stack regions, so it would not catch a runaway stack the way native Goose does. None of the suite's programs need either.`,
+  ];
+  $("method").innerHTML = items.map((t) => `<li>${t}</li>`).join("");
+  $("stamp").textContent = `Reference measured ${REF.date} with Node ${REF.node}`;
+  const blur = REF.benchmarks.find((b) => b.name === "blur" && b.size === SIZE);
+  const kb = blur && blur.rows.find((r) => r.lang === "goose");
+  if (kb) $("blur-kb").textContent = `blur.wasm, ${fmtKb(kb.kb)}`;
+}
+
+function render() { renderFigures(); renderHeats(); }
+
+// ---- running ---------------------------------------------------------------
+let worker = null;
+let pending = new Map();
+let nextId = 1;
+function call(msg) {
+  if (!worker) {
+    worker = new Worker(new URL("./worker.js", location.href), { type: "module" });
+    worker.onmessage = ({ data }) => { const p = pending.get(data.id); pending.delete(data.id); p(data); };
+  }
+  return new Promise((resolve) => { const id = nextId++; pending.set(id, resolve); worker.postMessage({ ...msg, id }); });
+}
+
+let busy = false;
+async function runHeats(indices) {
+  if (busy) return;
+  busy = true;
+  document.querySelectorAll("button").forEach((b) => (b.disabled = true));
+  const reps = Number($("reps").value);
+  const jobs = indices.flatMap((i) => {
+    const b = benches()[i];
+    // Alternate the languages so drift in the machine's state hits both.
+    const g = b.rows.filter((r) => r.lang === "goose"), r = b.rows.filter((r) => r.lang === "rust");
+    const out = [];
+    for (let k = 0; k < Math.max(g.length, r.length); k++) { if (g[k]) out.push([b, g[k]]); if (r[k]) out.push([b, r[k]]); }
+    return out;
+  });
+  let done = 0, failed = 0;
+  for (const [b, row] of jobs) {
+    $("status").textContent = `Running ${b.name}: ${row.label} (${done + 1} of ${jobs.length})`;
+    const res = await call({ url: new URL(row.wasm, location.href).href, lang: row.lang, reps });
+    if (!res.ok && /Content.Security.Policy|unsafe-eval|wasm-eval/i.test(res.error)) {
+      $("status").textContent = "This page's host does not allow WebAssembly to be compiled, so only the reference numbers can be shown here.";
+      document.querySelectorAll("button").forEach((b) => (b.disabled = false));
+      busy = false;
+      return;
+    }
+    if (!res.ok) failed++;
+    live.set(row.wasm, res.ok ? { ok: true, ms: res.ms, out: res.out } : { ok: false, error: res.error });
+    done++;
+    $("bar").style.width = `${(done / jobs.length) * 100}%`;
+    render();
+  }
+  const lv = ratios("live");
+  $("status").textContent = failed
+    ? `Done, but ${failed} of ${jobs.length} runs failed in this browser. The reference numbers stand.`
+    : `Done: ${jobs.length} runs, best of ${reps} each.` + (lv.length ? ` Goose geomean here: ${geomean(lv).toFixed(2)}×.` : "");
+  document.querySelectorAll("button").forEach((b) => (b.disabled = false));
+  busy = false;
+}
+
+if (typeof WebAssembly !== "object") {
+  $("run").disabled = true;
+  $("status").textContent = "This browser has no WebAssembly, so only the reference numbers are shown.";
+}
+$("run").addEventListener("click", () => runHeats(benches().map((_, i) => i)));
+
+// The size picker, with what a full run costs at the chosen repetitions:
+// every implementation once to warm up, then the chosen number of runs.
+function estimate(size, reps) {
+  const ms = REF.benchmarks.filter((b) => b.size === size).flatMap((b) => b.rows).reduce((a, r) => a + r.ms, 0);
+  const s = (ms * (1 + reps) * 1.3) / 1000;
+  return s < 60 ? `about ${Math.max(5, Math.round(s / 5) * 5)} s` : `about ${Math.round(s / 60)} min`;
+}
+function fillSizes() {
+  const reps = Number($("reps").value);
+  $("size").innerHTML = SIZES.map((sz) => `<option value="${sz}"${sz === SIZE ? " selected" : ""}>${sz} (${estimate(sz, reps)})</option>`).join("");
+}
+$("size").addEventListener("change", (e) => { SIZE = e.target.value; render(); });
+$("reps").addEventListener("change", fillSizes);
+fillSizes();
+$("heats").addEventListener("click", (e) => {
+  const t = e.target.closest("[data-run]");
+  if (t) runHeats([Number(t.dataset.run)]);
+});
+
+renderMethod();
+render();
+</script>
+
+</html>

@@ -1,0 +1,4 @@
+gen/
+scratch/
+__pycache__/
+.vercel/
